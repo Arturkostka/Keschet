@@ -1,1 +1,254 @@
-# Keschet
+# Keschet<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>Keschet - Automatické střídání hráčů při rozmísťování</title>
+<style>
+body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 20px;}
+.board-container { display: flex; gap: 10px; }
+.board { display: grid; grid-template-columns: repeat(10, 50px); grid-template-rows: repeat(10, 50px); gap: 1px;}
+.cell { width: 50px; height: 50px; display: flex; justify-content: center; align-items: center; background-color: #f0d9b5; border: 1px solid #b58863; cursor: pointer; }
+.cell.dark { background-color: #b58863; }
+.piece { font-weight: bold; font-size: 18px; cursor: pointer; }
+.pool-container { display: flex; flex-direction: column; gap: 10px; }
+.pool { display: flex; flex-direction: column; gap: 5px; width: 140px; }
+.pool-item { cursor: pointer; display: flex; justify-content: space-between; padding: 3px; border: 1px solid #555; }
+.pool-item.selected { background-color: #aaf; }
+.pool.active .pool-item { cursor: pointer; }
+.pool.inactive .pool-item { cursor: not-allowed; opacity: 0.5; }
+.player-label { font-weight: bold; text-align: center; margin-bottom: 5px; }
+</style>
+</head>
+<body>
+
+<h1>Keschet</h1>
+<div class="board-container">
+    <div id="pool1" class="pool-container">
+        <div class="player-label" style="color:blue;">Hráč 1</div>
+        <div id="player1-pool" class="pool"></div>
+    </div>
+    <div class="board" id="board"></div>
+    <div id="pool2" class="pool-container">
+        <div class="player-label" style="color:red;">Hráč 2</div>
+        <div id="player2-pool" class="pool"></div>
+    </div>
+</div>
+<p id="status">Hráč 1 rozmísťuje figurky</p>
+
+<script>
+const boardSize = 10;
+const board = document.getElementById('board');
+let selectedPieceType = null;
+let currentPlayer = 1;
+let phase = 'setup'; // 'setup' nebo 'game'
+
+// Definice figurek
+const basePieceTypes = {
+    'C': {name:'Císař', max:2, straight:true, diagonal:true, count:1},
+    'U': {name:'Učenec', max:4, straight:true, diagonal:true, special:'ochrana', count:1},
+    'G': {name:'Generál', max:10, straight:true, diagonal:true, count:1},
+    'Kp': {name:'Kopiník', max:10, diagonal:true, count:8},
+    'L': {name:'Lučištník', max:6, straight:true, count:5},
+    'H': {name:'Halapartník', max:2, straight:true, count:4},
+    'Z': {name:'Zloděj', max:1, straight:true, diagonal:true, special:'ukradni', count:3},
+    'Ku': {name:'Kupec', max:1, straight:true, diagonal:true, special:'k_cisarovi', count:2}
+};
+
+// Každý hráč má svůj vlastní zásobník
+let playerPools = {
+    1: Object.fromEntries(Object.entries(basePieceTypes).map(([k,v]) => [k, {...v}])),
+    2: Object.fromEntries(Object.entries(basePieceTypes).map(([k,v]) => [k, {...v}]))
+};
+
+// Vytvoření prázdné desky
+let cells = [];
+for(let i=0;i<boardSize;i++){
+    for(let j=0;j<boardSize;j++){
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        if((i+j)%2===1) cell.classList.add('dark');
+        cell.dataset.row = i;
+        cell.dataset.col = j;
+        cell.addEventListener('click', () => cellClick(i,j));
+        board.appendChild(cell);
+        cells.push(cell);
+    }
+}
+
+// Pole figurek na desce
+let pieces = [];
+
+// Panel obou hráčů
+function drawPiecePools(){
+    ['1','2'].forEach(p => {
+        const poolEl = document.getElementById(`player${p}-pool`);
+        poolEl.innerHTML = '';
+        const pool = playerPools[p];
+        const active = (parseInt(p)===currentPlayer && phase==='setup');
+        poolEl.className = active ? 'pool active' : 'pool inactive';
+        for(const key in pool){
+            const type = pool[key];
+            const item = document.createElement('div');
+            item.classList.add('pool-item');
+            if(active && selectedPieceType===key) item.classList.add('selected');
+            item.textContent = `${type.name} (${type.count})`;
+            if(active){
+                item.addEventListener('click', ()=> {
+                    if(type.count>0) selectedPieceType=key;
+                    drawPiecePools();
+                });
+            }
+            poolEl.appendChild(item);
+        }
+    });
+}
+
+// Kliknutí na políčko
+function cellClick(row,col){
+    if(phase==='setup'){
+        placeSetupPiece(row,col);
+    } else {
+        moveGamePiece(row,col);
+    }
+}
+
+// Rozmísťování figurek
+function placeSetupPiece(row,col){
+    if(!selectedPieceType){
+        alert('Vyber figurku z aktivního zásobníku!');
+        return;
+    }
+    const pool = playerPools[currentPlayer];
+    if(pool[selectedPieceType].count<=0) return; // nelze dát pod nulu
+
+    // Kontrola řad podle hráče
+    if(currentPlayer===1 && row>2) { alert('Hráč 1 může pokládat jen do prvních tří řad'); return; }
+    if(currentPlayer===2 && row<boardSize-3) { alert('Hráč 2 může pokládat jen do posledních tří řad'); return; }
+
+    // Kontrola, zda políčko je volné
+    if(pieces.find(p=>p.row===row && p.col===col)) { alert('Políčko je obsazeno'); return; }
+
+    // Přidání figurky
+    pieces.push({type:selectedPieceType, player:currentPlayer, row:row, col:col});
+    pool[selectedPieceType].count--;
+    if(pool[selectedPieceType].count===0) selectedPieceType=null;
+    drawPieces();
+
+    // Přepnutí hráče okamžitě po položení
+    currentPlayer = currentPlayer===1?2:1;
+
+    // Kontrola, zda je setup hotový
+    const setupFinished = Object.values(playerPools[1]).every(p=>p.count===0) && Object.values(playerPools[2]).every(p=>p.count===0);
+    if(setupFinished){
+        phase='game';
+        currentPlayer=1;
+        document.getElementById('status').textContent = `Tah hráče ${currentPlayer}`;
+    } else {
+        document.getElementById('status').textContent = `Hráč ${currentPlayer} rozmísťuje figurky`;
+    }
+    drawPiecePools();
+}
+
+// Zobrazení figurek
+function drawPieces(){
+    cells.forEach(cell => cell.innerHTML='');
+    pieces.forEach(p=>{
+        const idx = p.row*boardSize + p.col;
+        const pieceEl = document.createElement('span');
+        pieceEl.textContent = p.type;
+        pieceEl.classList.add('piece');
+        pieceEl.style.color = p.player===1?'blue':'red';
+        cells[idx].appendChild(pieceEl);
+    });
+}
+
+// Funkce pro pohyb během hry
+function moveGamePiece(row,col){
+    const selectedPiece = pieces.find(p=>p.player===currentPlayer && p.selected);
+    if(!selectedPiece) {
+        const p = pieces.find(p=>p.row===row && p.col===col && p.player===currentPlayer);
+        if(p) { p.selected=true; drawPieces(); return; } else return;
+    }
+
+    const targetPiece = pieces.find(p=>p.row===row && p.col===col);
+    if(selectedPiece.type==='Ku' && clearPathToCisar(selectedPiece)){
+        const cisar = pieces.find(p=>p.type==='C' && p.player!==selectedPiece.player);
+        row=cisar.row; col=cisar.col;
+    }
+
+    if(!isValidMove(selectedPiece,row,col) && !clearPathToCisar(selectedPiece)){
+        alert('Tento tah není povolen!');
+        selectedPiece.selected=false;
+        drawPieces();
+        return;
+    }
+
+    const scholars = pieces.filter(p=>p.type==='U');
+    for(const s of scholars){
+        if(s.row===row && s.col===col) continue;
+        if(Math.abs(s.row-row)<=1 && Math.abs(s.col-col)<=1){
+            alert('Učenec chrání tuto figurku!');
+            selectedPiece.selected=false;
+            drawPieces();
+            return;
+        }
+    }
+
+    if(targetPiece){
+        if(selectedPiece.type==='Z') targetPiece.player=selectedPiece.player;
+        else pieces=pieces.filter(p=>p!==targetPiece);
+    }
+
+    selectedPiece.row=row;
+    selectedPiece.col=col;
+    selectedPiece.selected=false;
+
+    checkWin();
+    currentPlayer=currentPlayer===1?2:1;
+    document.getElementById('status').textContent=`Tah hráče ${currentPlayer}`;
+    drawPieces();
+}
+
+// Pomocné funkce
+function isValidMove(piece,row,col){
+    const dr = Math.abs(piece.row - row);
+    const dc = Math.abs(piece.col - col);
+    if(dr===0 && dc===0) return false;
+    const typeInfo = basePieceTypes[piece.type];
+    if(typeInfo.diagonal && !typeInfo.straight) return dr===dc && dr<=typeInfo.max;
+    if(typeInfo.straight && !typeInfo.diagonal) return (dr===0 && dc<=typeInfo.max)||(dc===0 && dr<=typeInfo.max);
+    if(typeInfo.straight && typeInfo.diagonal) return dr<=typeInfo.max && dc<=typeInfo.max;
+    return false;
+}
+
+function clearPathToCisar(piece){
+    if(piece.type!=='Ku') return false;
+    const cisar = pieces.find(p=>p.type==='C' && p.player!==piece.player);
+    if(!cisar) return false;
+    let dr=Math.sign(cisar.row-piece.row), dc=Math.sign(cisar.col-piece.col);
+    let r=piece.row+dr, c=piece.col+dc;
+    while(r!==cisar.row || c!==cisar.col){
+        if(pieces.find(p=>p.row===r && p.col===c)) return false;
+        r+=dr; c+=dc;
+    }
+    return true;
+}
+
+function checkWin(){
+    for(let player=1;player<=2;player++){
+        const cisar = pieces.find(p=>p.player===player && p.type==='C');
+        const others = pieces.filter(p=>p.player===player && p.type!=='C');
+        if(!cisar || (others.length===0)){
+            alert(`Hráč ${player===1?2:1} vyhrál!`);
+            location.reload();
+        }
+    }
+}
+
+// Inicializace
+drawPieces();
+drawPiecePools();
+</script>
+
+</body>
+</html>
